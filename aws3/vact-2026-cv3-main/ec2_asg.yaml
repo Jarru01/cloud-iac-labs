@@ -30,7 +30,7 @@ Parameters:
   OurPublicIp:
     Description: Our source public IPv4 address
     Type: String
-    Default: '158.193.138.31/32'
+    Default: '0.0.0.0/0'
 
   ImageId:
     Description: AMI (Amazon Machine Image) ID
@@ -52,6 +52,7 @@ Parameters:
     Type: String
     # it's unique in each account. can be found in IAM service as AmazonSSMRoleForInstancesQuickSetup (part of Instance profile ARN)
     # e.g. c76725a1578383l3622172t1w000000000000-SsmRoleInstanceProfile-apue5UBzE6mA
+    Default: c201421a5141573l13826754t1w000000000000-SsmRoleInstanceProfile-1p4JHbVuoDEC
 
 
 Resources:
