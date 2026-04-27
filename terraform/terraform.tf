@@ -9,7 +9,7 @@ terraform {
 }
 
 provider "openstack" {
-  user_name           = "vact0"
+  user_name           = "REDACTED"
   tenant_name         = "vact2_0"
   password            = "REDACTED"
   insecure            = "true"
