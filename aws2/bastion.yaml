@@ -30,10 +30,8 @@ Parameters:
     Default: t3.medium
 
   IamInstanceProfileName:
-    Description: Instance IAM profile name
+    Description: Instance IAM profile name (account-specific, e.g. the SSM Quick Setup instance profile)
     Type: String
-    Default: c201421a5141573l13826754t1w000000000000-SsmRoleInstanceProfile-iuN9EBXHDzPy   #c76725a1578383l3609849t1w000000000000-SsmRoleInstanceProfile-40bcP8gOEOix
-    #change this
 
 Resources:
 

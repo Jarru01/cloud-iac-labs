@@ -17,6 +17,12 @@ Parameters:
     Type: String
     Default: ec2
 
+  NotificationEmail:
+    Description: Email address subscribed to the CPU alarm SNS topic (must confirm the subscription)
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ConstraintDescription: Must be a valid email address
+
 Resources:
   PrivateASGHighCPUAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -81,7 +87,7 @@ Resources:
     Properties:
       TopicName: CPUAlarmsSNSTopic
       Subscription:
-        - Endpoint: removed@example.com
+        - Endpoint: !Ref NotificationEmail
           Protocol: email
 
   CPUAlarmsSNSTopicPolicy:

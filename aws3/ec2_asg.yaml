@@ -51,7 +51,7 @@ Parameters:
     Description: Instance IAM profile name
     Type: String
     # it's unique in each account. can be found in IAM service as AmazonSSMRoleForInstancesQuickSetup (part of Instance profile ARN)
-    # e.g. c76725a1578383l3622172t1w000000000000-SsmRoleInstanceProfile-apue5UBzE6mA
+    # e.g. <prefix>-SsmRoleInstanceProfile-<suffix>
 
 
 Resources:

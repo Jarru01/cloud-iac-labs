@@ -1,0 +1,14 @@
+# Terraform / OpenTofu
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+
+# OpenStack credentials
+clouds.yaml
+secure.yaml
+*-openrc.sh
+
+# Keys
+*.pem

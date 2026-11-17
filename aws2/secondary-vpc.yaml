@@ -31,9 +31,8 @@ Parameters:
     Default: t3.medium
 
   IamInstanceProfileName:
-    Description: Instance IAM profile name
+    Description: Instance IAM profile name (account-specific, e.g. the SSM Quick Setup instance profile)
     Type: String
-    Default: c201421a5141573l13826754t1w000000000000-SsmRoleInstanceProfile-iuN9EBXHDzPy    #toto sa meni (iam)
 
   NetworkStackName:
     Description: Name of parent network CloudFormation stack

@@ -1,51 +1,56 @@
 terraform {
-  required_version = ">= 0.14.0"
+  required_version = ">= 1.5.0"
   required_providers {
     openstack = {
       source  = "terraform-provider-openstack/openstack"
-      version = "~> 1.35.0"
+      version = "~> 3.0"
     }
   }
 }
 
+# Credentials are not stored in code. The provider reads them from either:
+#   - a clouds.yaml entry selected with OS_CLOUD (or var.cloud), or
+#   - the standard OS_* environment variables from an OpenStack RC file
+#     (OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, ...).
 provider "openstack" {
-  user_name           = "REDACTED"
-  tenant_name         = "vact2_4"
-  password            = "REDACTED"
-  insecure            = "true"
-  auth_url            = "https://158.193.152.44:5000/v3/"
-  region              = "RegionOne"
-  user_domain_name    = "admin_domain"
-  project_domain_name = "admin_domain"
+  cloud = var.cloud
+}
 
-  endpoint_overrides = {
-    "network"  = "https://158.193.152.44:9696/v2.0/"
-    "compute"  = "https://158.193.152.44:8774/v2.1/"
-    "identity" = "https://158.193.152.44:5000/v3/"
-    "image"    = "https://158.193.152.44:9292/"
-  }
+variable "cloud" {
+  description = "Name of the clouds.yaml entry to use. Leave null to use OS_* environment variables."
+  type        = string
+  default     = null
 }
 
 variable "image" {
-  type    = string
-  default = "cirros"
+  description = "Name of the Glance image to boot."
+  type        = string
+  default     = "cirros"
 }
 
 variable "flavor" {
-  type    = string
-  default = "1c05r1d"
+  description = "Name of the Nova flavor."
+  type        = string
+  default     = "1c05r1d"
 }
 
 variable "network" {
-  type    = string
-  default = "ext-net-154"
+  description = "Name of the network to attach the instance to."
+  type        = string
+  default     = "ext-net-154"
 }
 
-resource "openstack_compute_instance_v2" "vm-terraform" {
+resource "openstack_compute_instance_v2" "vm_terraform" {
   name        = "vm-terraform"
   image_name  = var.image
   flavor_name = var.flavor
+
   network {
     name = var.network
   }
+}
+
+output "instance_ipv4" {
+  description = "IPv4 address of the created instance."
+  value       = openstack_compute_instance_v2.vm_terraform.access_ip_v4
 }
