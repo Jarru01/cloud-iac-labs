@@ -1,28 +1,38 @@
 heat_template_version: 2018-08-31
 
 description: >
-  Úloha 2: Jeden router prepájajúci dve rôzne interné siete.
-  PC1 je v sieti .33.0 a PC2 je v sieti .35.0.
+  Task 2 - One Neutron router connecting two internal networks.
+  PC1 is in 192.168.33.0/24, PC2 in 192.168.35.0/24. ICMP and FTP are
+  allowed on both, HTTP/HTTPS only on PC2, and the networks can talk to
+  each other.
 
 parameters:
   external_net:
     type: string
+    description: Name or ID of the external (provider) network
     default: ext-net-154
+  image:
+    type: string
+    description: Glance image for the VMs
+    default: cirros
+  flavor:
+    type: string
+    description: Nova flavor for the VMs
+    default: 1c05r1d
 
 resources:
 
   # -------------------------------------------------------
-  # 1. SIEŤOVÁ INFRAŠTRUKTÚRA (Router + 2x Net/Subnet)
+  # 1. Network: router and two internal networks
   # -------------------------------------------------------
-  
+
   router:
     type: OS::Neutron::Router
     properties:
-      name: router-uloha2
+      name: router-task2
       external_gateway_info:
         network: { get_param: external_net }
 
-  # Sieť pre PC1
   net_pc1:
     type: OS::Neutron::Net
     properties:
@@ -42,7 +52,6 @@ resources:
       router_id: { get_resource: router }
       subnet_id: { get_resource: subnet_pc1 }
 
-  # Sieť pre PC2
   net_pc2:
     type: OS::Neutron::Net
     properties:
@@ -63,21 +72,20 @@ resources:
       subnet_id: { get_resource: subnet_pc2 }
 
   # -------------------------------------------------------
-  # 2. SECURITY GROUPS
+  # 2. Security groups
   # -------------------------------------------------------
 
   sec_group_common:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-common-uloha2
+      name: sg-task2-common
       rules:
-        # Povoľ ICMP (ping)
         - protocol: icmp
-        # Povoľ FTP (port 21) na oba PC
+        # FTP control channel on both PCs
         - protocol: tcp
           port_range_min: 21
           port_range_max: 21
-        # Povoľ komunikáciu medzi sieťami (povolenie ingressu z oboch rozsahov)
+        # Traffic between the two internal networks
         - protocol: tcp
           remote_ip_prefix: 192.168.33.0/24
         - protocol: tcp
@@ -90,9 +98,9 @@ resources:
   sec_group_pc2:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-pc2-only
+      name: sg-task2-pc2
       rules:
-        # Povoľ HTTP/s pre PC2
+        # HTTP and HTTPS on PC2 only
         - protocol: tcp
           port_range_min: 80
           port_range_max: 80
@@ -101,16 +109,15 @@ resources:
           port_range_max: 443
 
   # -------------------------------------------------------
-  # 3. VIRTUÁLNE STROJE
+  # 3. Virtual machines
   # -------------------------------------------------------
 
   pc1:
     type: OS::Nova::Server
     properties:
       name: pc1
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: net_pc1 }
       security_groups: [ { get_resource: sec_group_common } ]
@@ -119,11 +126,10 @@ resources:
     type: OS::Nova::Server
     properties:
       name: pc2
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: net_pc2 }
-      security_groups: 
+      security_groups:
         - { get_resource: sec_group_common }
         - { get_resource: sec_group_pc2 }

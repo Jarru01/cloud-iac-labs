@@ -1,43 +1,54 @@
 heat_template_version: 2018-08-31
 
 description: >
-  Úloha 10: Vytvorenie dynamického počtu VM podľa zadania používateľa.
-  Používa ResourceGroup na replikáciu definície servera.
+  Task 10 - A user-chosen number of VMs created from one definition with
+  OS::Heat::ResourceGroup. Each VM gets a unique name
+  (<stack-name>-server-0, -1, ...).
 
 parameters:
   external_net:
     type: string
+    description: Name or ID of the external (provider) network
     default: ext-net-154
-  
-  pocet_vm:
+  vm_count:
     type: number
-    description: Zadajte počet virtuálnych strojov, ktoré chcete vytvoriť.
+    description: Number of VMs to create
     default: 2
     constraints:
       - range: { min: 1, max: 5 }
-        description: Počet VM musí byť medzi 1 a 5 (kvôli kvótam).
+        description: Must be between 1 and 5 (project quota).
+  image:
+    type: string
+    description: Glance image for the VMs
+    default: cirros
+  flavor:
+    type: string
+    description: Nova flavor for the VMs
+    default: 1c05r1d
 
 resources:
-  # SKUPINA ZDROJOV (Resource Group)
-  skupina_serverov:
+  server_group:
     type: OS::Heat::ResourceGroup
     properties:
-      count: { get_param: pocet_vm }
+      count: { get_param: vm_count }
       resource_def:
         type: OS::Nova::Server
         properties:
-          # %index% zabezpečí, že každá VM bude mať unikátne meno (server-0, server-1, ...)
-          name: 
+          # %index% is replaced with 0, 1, 2, ... by the ResourceGroup
+          name:
             str_replace:
               template: STACK-server-%index%
               params:
                 STACK: { get_param: "OS::stack_name" }
-          image: cirros
-          flavor: 1c05r1d
+          image: { get_param: image }
+          flavor: { get_param: flavor }
           networks:
             - network: { get_param: external_net }
 
 outputs:
-  zoznam_ip:
-    description: Zoznam IP adries všetkých vytvorených VM.
-    value: { get_attr: [skupina_serverov, refs] }
+  server_ips:
+    description: IP address of each VM on the external network, in index order
+    value: { get_attr: [server_group, networks, { get_param: external_net }, 0] }
+  server_ids:
+    description: Nova IDs of the VMs
+    value: { get_attr: [server_group, refs] }

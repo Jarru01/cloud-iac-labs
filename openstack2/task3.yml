@@ -1,28 +1,42 @@
 heat_template_version: 2018-08-31
 
 description: >
-  Úloha 3: Jeden router prepájajúci dve siete (10.0.1.0/24 s jedným PC 
-  a 172.16.99.0/24 s dvoma PC) so špecifickými bezpečnostnými pravidlami.
+  Task 3 - One Neutron router connecting two networks: 10.0.1.0/24 with PC1
+  and 172.16.99.0/24 with PC2 and PC3. ICMP, SSH and RDP are allowed
+  everywhere; HTTP/HTTPS and DNS only from the trusted network; all
+  traffic between the two internal networks is allowed.
 
 parameters:
   external_net:
     type: string
+    description: Name or ID of the external (provider) network
     default: ext-net-154
+  trusted_cidr:
+    type: string
+    description: Network allowed to reach HTTP/HTTPS and DNS (the university network in the original assignment)
+    default: 158.193.0.0/16
+  image:
+    type: string
+    description: Glance image for the VMs
+    default: cirros
+  flavor:
+    type: string
+    description: Nova flavor for the VMs
+    default: 1c05r1d
 
 resources:
 
   # -------------------------------------------------------
-  # 1. SIEŤOVÁ INFRAŠTRUKTÚRA (Router + 2x Net/Subnet)
+  # 1. Network: router and two internal networks
   # -------------------------------------------------------
 
   router:
     type: OS::Neutron::Router
     properties:
-      name: router-uloha3
+      name: router-task3
       external_gateway_info:
         network: { get_param: external_net }
 
-  # Sieť A (horná na obrázku) - 10.0.1.0/24
   net_a:
     type: OS::Neutron::Net
     properties:
@@ -42,7 +56,6 @@ resources:
       router_id: { get_resource: router }
       subnet_id: { get_resource: subnet_a }
 
-  # Sieť B (dolná na obrázku) - 172.16.99.0/24
   net_b:
     type: OS::Neutron::Net
     properties:
@@ -63,18 +76,17 @@ resources:
       subnet_id: { get_resource: subnet_b }
 
   # -------------------------------------------------------
-  # 2. SECURITY GROUPS
+  # 2. Security group
   # -------------------------------------------------------
 
   sec_group_main:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-uloha3
+      name: sg-task3
       rules:
-        # Povoľ ICMP
         - protocol: icmp
-        
-        # Povoľ SSH (22) a RDP (3389) všade
+
+        # SSH and RDP from anywhere
         - protocol: tcp
           port_range_min: 22
           port_range_max: 22
@@ -82,40 +94,39 @@ resources:
           port_range_min: 3389
           port_range_max: 3389
 
-        # Povoľ HTTP/s a DNS len z UNIZA siete
+        # HTTP/HTTPS and DNS only from the trusted network
         - protocol: tcp
           port_range_min: 80
           port_range_max: 80
-          remote_ip_prefix: 158.193.0.0/16
+          remote_ip_prefix: { get_param: trusted_cidr }
         - protocol: tcp
           port_range_min: 443
           port_range_max: 443
-          remote_ip_prefix: 158.193.0.0/16
+          remote_ip_prefix: { get_param: trusted_cidr }
         - protocol: udp
           port_range_min: 53
           port_range_max: 53
-          remote_ip_prefix: 158.193.0.0/16
+          remote_ip_prefix: { get_param: trusted_cidr }
         - protocol: tcp
           port_range_min: 53
           port_range_max: 53
-          remote_ip_prefix: 158.193.0.0/16
+          remote_ip_prefix: { get_param: trusted_cidr }
 
-        # Povoľ komunikáciu medzi sieťami (všetky protokoly)
-        # Vynechaním 'protocol' Neutron povolí všetky protokoly z daného prefixu
+        # All protocols between the internal networks
+        # (omitting 'protocol' makes Neutron match any protocol)
         - remote_ip_prefix: 10.0.1.0/24
         - remote_ip_prefix: 172.16.99.0/24
 
   # -------------------------------------------------------
-  # 3. VIRTUÁLNE STROJE (PC1 v hornom, PC2 a PC3 v dolnom)
+  # 3. Virtual machines
   # -------------------------------------------------------
 
   pc1:
     type: OS::Nova::Server
     properties:
       name: pc1
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: net_a }
       security_groups: [ { get_resource: sec_group_main } ]
@@ -124,9 +135,8 @@ resources:
     type: OS::Nova::Server
     properties:
       name: pc2
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: net_b }
       security_groups: [ { get_resource: sec_group_main } ]
@@ -135,9 +145,8 @@ resources:
     type: OS::Nova::Server
     properties:
       name: pc3
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: net_b }
       security_groups: [ { get_resource: sec_group_main } ]

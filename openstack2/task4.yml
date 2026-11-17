@@ -1,19 +1,48 @@
 heat_template_version: 2018-08-31
 
 description: >
-  Úloha 4: Topológia s Router VM, jednou internou sieťou a dvoma PC.
-  Špecifické obmedzenia pre RFC 1918 a UNIZA sieť.
+  Task 4 - A dual-homed router VM (IP forwarding + NAT) in front of one
+  internal network 10.255.55.0/24 with PC1 and PC2. SSH and RDP only from
+  the trusted network, HTTP/HTTPS and DNS only from private (RFC 1918)
+  ranges, and PC2 additionally exposes SMB.
 
 parameters:
   external_net:
     type: string
+    description: Name or ID of the external (provider) network
     default: ext-net-154
+  trusted_cidr:
+    type: string
+    description: Network allowed to use SSH and RDP (the university network in the original assignment)
+    default: 158.193.0.0/16
+  image:
+    type: string
+    description: Glance image for PC1 and PC2
+    default: cirros
+  flavor:
+    type: string
+    description: Nova flavor for PC1 and PC2
+    default: 1c05r1d
+  router_image:
+    type: string
+    description: Glance image for the router VM (Debian-based; needs iptables/apt)
+    default: debian-12-kis
+  router_flavor:
+    type: string
+    description: Nova flavor for the router VM
+    default: 1c2r50d
+  router_internal_ip:
+    type: string
+    description: Address of the router VM on the internal network (default gateway for the PCs)
+    default: 10.255.55.254
 
 resources:
 
   # -------------------------------------------------------
-  # 1. SIEŤOVÁ INFRAŠTRUKTÚRA
+  # 1. Network
   # -------------------------------------------------------
+  # No Neutron router: the subnet has no gateway of its own and the PCs
+  # get their default route via the router VM in user_data.
   internal_net:
     type: OS::Neutron::Net
     properties:
@@ -25,123 +54,142 @@ resources:
       name: subnet-10-255-55
       network_id: { get_resource: internal_net }
       cidr: 10.255.55.0/24
-      gateway_ip: 10.255.55.1
+      gateway_ip: null
+      dns_nameservers: [ 1.1.1.1, 8.8.8.8 ]
 
   # -------------------------------------------------------
-  # 2. SECURITY GROUPS
+  # 2. Security groups
   # -------------------------------------------------------
+
   sec_group_main:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-uloha4-common
+      name: sg-task4-common
       rules:
         - protocol: icmp
-        # SSH a RDP len z UNIZA (158.193.0.0/16)
+        # SSH and RDP only from the trusted network
         - protocol: tcp
           port_range_min: 22
           port_range_max: 22
-          remote_ip_prefix: 158.193.0.0/16
+          remote_ip_prefix: { get_param: trusted_cidr }
         - protocol: tcp
           port_range_min: 3389
           port_range_max: 3389
-          remote_ip_prefix: 158.193.0.0/16
-        # HTTP/s a DNS len z privátnych sietí (RFC 1918)
-        - protocol: tcp # HTTP
-          port_range_min: 80
-          port_range_max: 80
-          remote_ip_prefix: 10.0.0.0/8
-        - protocol: tcp
-          port_range_min: 80
-          port_range_max: 80
-          remote_ip_prefix: 172.16.0.0/12
-        - protocol: tcp
-          port_range_min: 80
-          port_range_max: 80
-          remote_ip_prefix: 192.168.0.0/16
-        - protocol: tcp # HTTPS
-          port_range_min: 443
-          port_range_max: 443
-          remote_ip_prefix: 10.0.0.0/8
-        - protocol: tcp
-          port_range_min: 443
-          port_range_max: 443
-          remote_ip_prefix: 172.16.0.0/12
-        - protocol: tcp
-          port_range_min: 443
-          port_range_max: 443
-          remote_ip_prefix: 192.168.0.0/16
-        - protocol: udp # DNS
-          port_range_min: 53
-          port_range_max: 53
-          remote_ip_prefix: 10.0.0.0/8
-        - protocol: udp
-          port_range_min: 53
-          port_range_max: 53
-          remote_ip_prefix: 172.16.0.0/12
-        - protocol: udp
-          port_range_min: 53
-          port_range_max: 53
-          remote_ip_prefix: 192.168.0.0/16
+          remote_ip_prefix: { get_param: trusted_cidr }
+        # HTTP, HTTPS and DNS only from private ranges (RFC 1918)
+        - { protocol: tcp, port_range_min: 80,  port_range_max: 80,  remote_ip_prefix: 10.0.0.0/8 }
+        - { protocol: tcp, port_range_min: 80,  port_range_max: 80,  remote_ip_prefix: 172.16.0.0/12 }
+        - { protocol: tcp, port_range_min: 80,  port_range_max: 80,  remote_ip_prefix: 192.168.0.0/16 }
+        - { protocol: tcp, port_range_min: 443, port_range_max: 443, remote_ip_prefix: 10.0.0.0/8 }
+        - { protocol: tcp, port_range_min: 443, port_range_max: 443, remote_ip_prefix: 172.16.0.0/12 }
+        - { protocol: tcp, port_range_min: 443, port_range_max: 443, remote_ip_prefix: 192.168.0.0/16 }
+        - { protocol: udp, port_range_min: 53,  port_range_max: 53,  remote_ip_prefix: 10.0.0.0/8 }
+        - { protocol: udp, port_range_min: 53,  port_range_max: 53,  remote_ip_prefix: 172.16.0.0/12 }
+        - { protocol: udp, port_range_min: 53,  port_range_max: 53,  remote_ip_prefix: 192.168.0.0/16 }
 
   sec_group_pc2:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-uloha4-pc2
+      name: sg-task4-pc2
       rules:
-        # SMB (TCP 445 a UDP 137, 138, 139)
+        # SMB: TCP 445 and 139, NetBIOS UDP 137-138
+        - { protocol: tcp, port_range_min: 445, port_range_max: 445 }
+        - { protocol: tcp, port_range_min: 139, port_range_max: 139 }
+        - { protocol: udp, port_range_min: 137, port_range_max: 138 }
+
+  sec_group_router:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: sg-task4-router
+      rules:
+        - protocol: icmp
         - protocol: tcp
-          port_range_min: 445
-          port_range_max: 445
-        - protocol: tcp
-          port_range_min: 139
-          port_range_max: 139
-        - protocol: udp
-          port_range_min: 137
-          port_range_max: 138
+          port_range_min: 22
+          port_range_max: 22
+          remote_ip_prefix: { get_param: trusted_cidr }
 
   # -------------------------------------------------------
-  # 3. VIRTUÁLNE STROJE
+  # 3. Router VM
   # -------------------------------------------------------
 
-  # ROUTER VM (ako v referencii)
+  router_ext_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: external_net }
+      security_groups: [ { get_resource: sec_group_router } ]
+
+  # Port security is disabled on the internal leg: Neutron's anti-spoofing
+  # would otherwise drop packets the VM forwards on behalf of the PCs.
+  router_int_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: internal_net }
+      fixed_ips:
+        - subnet: { get_resource: internal_subnet }
+          ip_address: { get_param: router_internal_ip }
+      port_security_enabled: false
+
   router_vm:
     type: OS::Nova::Server
     properties:
       name: router-vm
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: router_image }
+      flavor: { get_param: router_flavor }
       networks:
-        - network: { get_param: external_net }
-        - network: { get_resource: internal_net }
-      security_groups: [ { get_resource: sec_group_main } ]
+        - port: { get_resource: router_ext_port }
+        - port: { get_resource: router_int_port }
       user_data_format: RAW
       user_data: |
-        #!/bin/sh
-        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-        sysctl -p
-        iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+        #!/bin/bash
+        set -eu
+        echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-ip-forward.conf
+        sysctl -w net.ipv4.ip_forward=1
+        command -v iptables >/dev/null || { apt-get update; apt-get install -y iptables; }
+        EXT_IF=$(ip route show default | awk '{print $5; exit}')
+        iptables -t nat -A POSTROUTING -o "$EXT_IF" -j MASQUERADE
+
+  # -------------------------------------------------------
+  # 4. Client VMs
+  # -------------------------------------------------------
+
+  pc_user_data:
+    type: OS::Heat::Value
+    properties:
+      value:
+        str_replace:
+          params:
+            __ROUTER_IP__: { get_param: router_internal_ip }
+          template: |
+            #!/bin/sh
+            ip route replace default via __ROUTER_IP__
 
   pc1:
     type: OS::Nova::Server
     properties:
       name: pc1
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: internal_net }
       security_groups: [ { get_resource: sec_group_main } ]
+      user_data_format: RAW
+      user_data: { get_attr: [pc_user_data, value] }
 
   pc2:
     type: OS::Nova::Server
     properties:
       name: pc2
-      image: cirros
-      flavor: 1c05r1d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: internal_net }
-      security_groups: 
+      security_groups:
         - { get_resource: sec_group_main }
         - { get_resource: sec_group_pc2 }
+      user_data_format: RAW
+      user_data: { get_attr: [pc_user_data, value] }
+
+outputs:
+  router_external_ip:
+    description: Address of the router VM on the external network
+    value: { get_attr: [router_ext_port, fixed_ips, 0, ip_address] }

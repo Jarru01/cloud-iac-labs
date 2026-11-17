@@ -1,17 +1,39 @@
 heat_template_version: 2018-08-31
 
-description: Router VM + internal web server with restricted security
+description: >
+  Task 3 - A Linux VM acting as router/NAT gateway, and a web server on an
+  internal network behind it. SSH is restricted to a trusted network; the
+  web server installs Apache and reaches the internet through the router VM.
 
 parameters:
   external_net:
     type: string
+    description: Name or ID of the external (provider) network
     default: ext-net-154
+  trusted_cidr:
+    type: string
+    description: Network allowed to SSH in (the university network in the original assignment)
+    default: 158.193.0.0/16
+  image:
+    type: string
+    description: Glance image for both VMs (Debian-based; the router needs iptables/apt)
+    default: debian-12-kis
+  flavor:
+    type: string
+    description: Nova flavor for both VMs
+    default: 1c2r50d
+  router_internal_ip:
+    type: string
+    description: Address of the router VM on the internal network (default gateway for the web server)
+    default: 10.0.1.254
 
 resources:
 
   # ----------------------
   # Internal network
   # ----------------------
+  # No Neutron router is attached, so the subnet has no gateway of its own.
+  # The web server gets its default route via the router VM in user_data.
   internal_net:
     type: OS::Neutron::Net
     properties:
@@ -24,72 +46,120 @@ resources:
       network_id: { get_resource: internal_net }
       cidr: 10.0.1.0/24
       ip_version: 4
-      gateway_ip: 10.0.1.1
+      gateway_ip: null
+      dns_nameservers: [ 1.1.1.1, 8.8.8.8 ]
 
   # ----------------------
-  # Security group
+  # Security groups
   # ----------------------
-  sec_group:
+  sg_router:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-secure
+      name: sg-task3-router
       rules:
-        # SSH only from UNIZA
         - protocol: tcp
           port_range_min: 22
           port_range_max: 22
-          remote_ip_prefix: 158.193.0.0/16
+          remote_ip_prefix: { get_param: trusted_cidr }
+        - protocol: icmp
 
-        # HTTP (web server)
+  sg_web:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: sg-task3-web
+      rules:
+        # SSH from the trusted network or from the router VM (jump host)
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+          remote_ip_prefix: { get_param: trusted_cidr }
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+          remote_ip_prefix: 10.0.1.0/24
         - protocol: tcp
           port_range_min: 80
           port_range_max: 80
-
-        # ICMP
         - protocol: icmp
 
   # ----------------------
-  # ROUTER VM
+  # Router VM (dual-homed)
   # ----------------------
+  router_ext_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: external_net }
+      security_groups: [ { get_resource: sg_router } ]
+
+  # Port security is disabled on the internal leg: Neutron's anti-spoofing
+  # would otherwise drop packets the VM forwards on behalf of other hosts.
+  router_int_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: internal_net }
+      fixed_ips:
+        - subnet: { get_resource: internal_subnet }
+          ip_address: { get_param: router_internal_ip }
+      port_security_enabled: false
+
   router_vm:
     type: OS::Nova::Server
     properties:
       name: router-vm
-      image: debian-12-kis
-      flavor: 1c2r50d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
-        - network: { get_param: external_net }   # external
-        - network: { get_resource: internal_net } # internal
-      security_groups: [ { get_resource: sec_group } ]
+        - port: { get_resource: router_ext_port }
+        - port: { get_resource: router_int_port }
       user_data_format: RAW
       user_data: |
         #!/bin/bash
-        # Enable routing
-        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-        sysctl -p
+        set -eu
+        # Enable routing (now and after reboot)
+        echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-ip-forward.conf
+        sysctl -w net.ipv4.ip_forward=1
 
-        # Enable NAT (important!)
-        iptables -t nat -A POSTROUTING -o ens3 -j MASQUERADE
+        # NAT everything leaving through the interface that holds the default route
+        command -v iptables >/dev/null || { apt-get update; apt-get install -y iptables; }
+        EXT_IF=$(ip route show default | awk '{print $5; exit}')
+        iptables -t nat -A POSTROUTING -o "$EXT_IF" -j MASQUERADE
 
   # ----------------------
-  # WEB SERVER VM
-  # need to edit default route later
+  # Web server VM
   # ----------------------
   web_vm:
     type: OS::Nova::Server
+    depends_on: router_vm
     properties:
       name: web-vm
-      image: debian-12-kis
-      flavor: 1c2r50d
-      availability_zone: nova
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_resource: internal_net }
-      security_groups: [ { get_resource: sec_group } ]
+      security_groups: [ { get_resource: sg_web } ]
       user_data_format: RAW
-      user_data: |
-        #!/bin/bash
-        apt update
-        apt install -y apache2
-        systemctl enable apache2
-        systemctl start apache2
+      user_data:
+        str_replace:
+          params:
+            __ROUTER_IP__: { get_param: router_internal_ip }
+          template: |
+            #!/bin/bash
+            set -eu
+            # Default route via the router VM, then wait until it forwards traffic
+            ip route replace default via __ROUTER_IP__
+            for i in $(seq 1 60); do
+              ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && break
+              sleep 5
+            done
+
+            apt-get update
+            apt-get install -y apache2
+            systemctl enable --now apache2
+
+outputs:
+  router_external_ip:
+    description: Address of the router VM on the external network
+    value: { get_attr: [router_ext_port, fixed_ips, 0, ip_address] }
+  web_internal_ip:
+    description: Address of the web server on the internal network
+    value: { get_attr: [web_vm, networks, net-is2, 0] }

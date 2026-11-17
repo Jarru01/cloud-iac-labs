@@ -1,53 +1,60 @@
 heat_template_version: 2018-08-31
 
 description: >
-  Úloha 9: Oprava vlastnosti security_group pre pravidlo Telnetu.
+  Task 9 - VM with a security group that always allows SSH. A Telnet rule
+  (TCP 23) is added only when the allow_telnet parameter is true, using a
+  Heat condition.
 
 parameters:
   external_net:
     type: string
+    description: Name or ID of the external (provider) network
     default: ext-net-154
-  
-  povolenie_telnetu:
+  allow_telnet:
     type: boolean
-    description: Chcete povoliť protokol Telnet (port 23)?
+    description: Open Telnet (TCP 23)?
     default: false
+  image:
+    type: string
+    description: Glance image for the VM
+    default: cirros
+  flavor:
+    type: string
+    description: Nova flavor for the VM
+    default: 1c05r1d
 
 conditions:
-  vytvorit_telnet_pravidlo: {equals: [{get_param: povolenie_telnetu}, true]}
+  create_telnet_rule: { equals: [ { get_param: allow_telnet }, true ] }
 
 resources:
-  # 1. ZÁKLADNÁ SECURITY GROUP
-  moja_sg:
+  sec_group:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-uloha9
+      name: sg-task9
       rules:
         - protocol: tcp
           port_range_min: 22
           port_range_max: 22
 
-  # 2. SAMOSTATNÉ PRAVIDLO PRE TELNET
+  # Separate rule resource so it can be created conditionally
   telnet_rule:
     type: OS::Neutron::SecurityGroupRule
-    condition: vytvorit_telnet_pravidlo
+    condition: create_telnet_rule
     properties:
-      # ZMENA: Namiesto security_group_id skúsime security_group
-      security_group: { get_resource: moja_sg }
+      security_group: { get_resource: sec_group }
+      direction: ingress
+      ethertype: IPv4
       protocol: tcp
       port_range_min: 23
       port_range_max: 23
-      direction: ingress
-      ethertype: IPv4 # Pridané pre lepšiu kompatibilitu
 
-  # 3. VIRTUÁLNY STROJ
-  server_uloha9:
+  server:
     type: OS::Nova::Server
     properties:
-      name: server-uloha9
-      image: cirros
-      flavor: 1c05r1d
+      name: server-task9
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_param: external_net }
       security_groups:
-        - { get_resource: moja_sg }
+        - { get_resource: sec_group }

@@ -1,35 +1,50 @@
 heat_template_version: 2018-08-31
 
 description: >
-  Úloha 6: Verzia bez explicitného enable_snat (rieši Forbidden error).
-  DNS a Porty zostávajú zachované pre správnu inštaláciu služieb.
+  Task 6 - Neutron router with internal network 10.0.0.0/24, a dual-homed
+  jump server, an Apache application server (fixed IP 10.0.0.25) and a
+  Squid proxy (fixed IP 10.0.0.10). Services are installed via user_data.
+  The router does not set enable_snat explicitly, because changing it
+  requires admin rights (403 Forbidden for a regular project user).
 
 parameters:
   external_net:
     type: string
+    description: Name or ID of the external (provider) network
     default: ext-net-154
+  admin_cidr:
+    type: string
+    description: Network allowed to SSH to the jump server (the university network in the original assignment)
+    default: 158.193.0.0/16
+  image:
+    type: string
+    description: Glance image for all VMs (Debian-based)
+    default: debian-12-kis
+  flavor:
+    type: string
+    description: Nova flavor for all VMs
+    default: 1c1r10d
 
 resources:
   # -------------------------------------------------------
-  # 1. SIEŤOVÁ INFRAŠTRUKTÚRA
+  # 1. Network
   # -------------------------------------------------------
   router:
     type: OS::Neutron::Router
     properties:
-      name: router-uloha6
+      name: router-task6
       external_gateway_info:
         network: { get_param: external_net }
-        # Odstránené enable_snat, ktoré spôsobovalo Forbidden
 
   internal_net:
     type: OS::Neutron::Net
     properties:
-      name: net-uloha6
+      name: net-task6
 
   internal_subnet:
     type: OS::Neutron::Subnet
     properties:
-      name: subnet-uloha6
+      name: subnet-task6
       network_id: { get_resource: internal_net }
       cidr: 10.0.0.0/24
       gateway_ip: 10.0.0.1
@@ -42,26 +57,29 @@ resources:
       subnet_id: { get_resource: internal_subnet }
 
   # -------------------------------------------------------
-  # 2. SECURITY GROUPS
+  # 2. Security groups
   # -------------------------------------------------------
   sg_jump:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-jump
+      name: sg-task6-jump
       rules:
         - protocol: tcp
           port_range_min: 22
           port_range_max: 22
+          remote_ip_prefix: { get_param: admin_cidr }
         - protocol: icmp
 
   sg_app:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-app
+      name: sg-task6-app
       rules:
+        # SSH only from inside the network (i.e. via the jump server)
         - protocol: tcp
           port_range_min: 22
           port_range_max: 22
+          remote_ip_prefix: 10.0.0.0/24
         - protocol: tcp
           port_range_min: 80
           port_range_max: 80
@@ -70,44 +88,33 @@ resources:
   sg_proxy:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: sg-proxy
+      name: sg-task6-proxy
       rules:
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+          remote_ip_prefix: 10.0.0.0/24
+        # Proxy port only for clients on the internal network
         - protocol: tcp
           port_range_min: 3128
           port_range_max: 3128
+          remote_ip_prefix: 10.0.0.0/24
         - protocol: icmp
 
   # -------------------------------------------------------
-  # 3. VIRTUÁLNE STROJE A PORTY
+  # 3. Virtual machines and ports
   # -------------------------------------------------------
 
   jump_vm:
     type: OS::Nova::Server
     properties:
       name: jump-server
-      image: debian-12-kis
-      flavor: 1c1r10d
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
         - network: { get_param: external_net }
         - network: { get_resource: internal_net }
       security_groups: [ { get_resource: sg_jump } ]
-
-  app_vm:
-    type: OS::Nova::Server
-    properties:
-      name: application-apache2
-      image: debian-12-kis
-      flavor: 1c1r10d
-      networks:
-        - port: { get_resource: app_port }
-      user_data_format: RAW
-      user_data: |
-        #!/bin/bash
-        apt-get update
-        apt-get install -y apache2
-        echo "<h1>Server Apache bezi na 10.0.0.25</h1>" > /var/www/html/index.html
-        systemctl enable apache2
-        systemctl start apache2
 
   app_port:
     type: OS::Neutron::Port
@@ -116,22 +123,23 @@ resources:
       fixed_ips: [{ ip_address: 10.0.0.25 }]
       security_groups: [ { get_resource: sg_app } ]
 
-  proxy_vm:
+  app_vm:
     type: OS::Nova::Server
+    depends_on: router_if
     properties:
-      name: proxy-squid3
-      image: debian-12-kis
-      flavor: 1c1r10d
+      name: application-apache2
+      image: { get_param: image }
+      flavor: { get_param: flavor }
       networks:
-        - port: { get_resource: proxy_port }
+        - port: { get_resource: app_port }
       user_data_format: RAW
       user_data: |
         #!/bin/bash
+        set -eu
         apt-get update
-        apt-get install -y squid
-        sed -i 's/http_access deny all/http_access allow all/g' /etc/squid/squid.conf
-        systemctl enable squid
-        systemctl restart squid
+        apt-get install -y apache2
+        echo "<h1>Apache is running on 10.0.0.25</h1>" > /var/www/html/index.html
+        systemctl enable --now apache2
 
   proxy_port:
     type: OS::Neutron::Port
@@ -139,3 +147,32 @@ resources:
       network_id: { get_resource: internal_net }
       fixed_ips: [{ ip_address: 10.0.0.10 }]
       security_groups: [ { get_resource: sg_proxy } ]
+
+  proxy_vm:
+    type: OS::Nova::Server
+    depends_on: router_if
+    properties:
+      name: proxy-squid
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: proxy_port }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        set -eu
+        apt-get update
+        apt-get install -y squid
+        # Allow only the internal network; Debian's squid.conf includes
+        # conf.d/*.conf before its final "http_access deny all".
+        cat > /etc/squid/conf.d/10-internal-net.conf <<'EOF'
+        acl internal_net src 10.0.0.0/24
+        http_access allow internal_net
+        EOF
+        systemctl enable squid
+        systemctl restart squid
+
+outputs:
+  jump_server_ip:
+    description: Address of the jump server on the external network
+    value: { get_attr: [jump_vm, networks, { get_param: external_net }, 0] }
