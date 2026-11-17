@@ -216,7 +216,6 @@ Resources:
       RouteTableId: !Ref PrivateRouteTableC
 
   DefaultRouteA:
-    DependsOn: NATGatewayA
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableA
@@ -224,7 +223,6 @@ Resources:
         NatGatewayId: !Ref NATGatewayA
 
   DefaultRouteB:
-    DependsOn: NATGatewayB
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableB
@@ -232,7 +230,6 @@ Resources:
         NatGatewayId: !Ref NATGatewayB
 
   DefaultRouteC:
-    DependsOn: NATGatewayC
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableC

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 
-Description: Cvicenie 3 - EC2 instances & auto-scaling & load-balancing
+Description: Lab 3 - Application Load Balancer in front of a private EC2 Auto Scaling group (sample PHP/MariaDB app)
 
 ###########################################################################
 # Useful CloudFormation docs
@@ -28,17 +28,14 @@ Parameters:
     Default: basic-network
 
   OurPublicIp:
-    Description: Our source public IPv4 address
+    Description: Source public IPv4 address allowed to reach the ALB and public instance, in CIDR form (e.g. 203.0.113.10/32)
     Type: String
-    Default: '158.193.138.31/32'
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
 
   ImageId:
-    Description: AMI (Amazon Machine Image) ID
-    Type: String
-    # more info: https://docs.amazonaws.cn/en_us/AWSEC2/latest/UserGuide/finding-an-ami.html
-    # list of usable AMIs can be found in AWS console -> EC2 -> AMI Catalog
-    # Amazon Linux 2023 64-bit x86 (HVM), Kernel 6.1, SSD Volume Type, us-east-1
-    Default: ami-0f3caa1cf4417e51b
+    Description: AMI ID, resolved from the public SSM parameter for the latest Amazon Linux 2023 image in the current region
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
   InstanceType:
     Description: Instance type (number of vCPUs, memory, bandwidth, etc.)
@@ -160,99 +157,111 @@ Resources:
         - Key: Project
           Value: !Ref Project
 
-  # AWS docs: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-autoscaling-launchconfiguration.html
-  PrivateLaunchConfiguration:
-    Type: AWS::AutoScaling::LaunchConfiguration
+  # AWS docs: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-launchtemplate.html
+  # (replaces the deprecated AWS::AutoScaling::LaunchConfiguration)
+  PrivateLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
     Properties:
-      ImageId: !Ref ImageId
-      InstanceType: !Ref InstanceType
-      SecurityGroups:
-        - !Ref SecurityGroupForPrivateInstances
-      KeyName: !Ref SSHKeyPair
-      IamInstanceProfile: !Ref IamInstanceProfileName
-      UserData:
-        Fn::Base64:
-          |
-          #!/bin/bash
+      LaunchTemplateName: !Sub ${AWS::StackName}-private-web
+      LaunchTemplateData:
+        ImageId: !Ref ImageId
+        InstanceType: !Ref InstanceType
+        SecurityGroupIds:
+          - !Ref SecurityGroupForPrivateInstances
+        KeyName: !Ref SSHKeyPair
+        IamInstanceProfile:
+          Name: !Ref IamInstanceProfileName
+        MetadataOptions:
+          HttpTokens: required # enforce IMDSv2 (the user data below already uses tokens)
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeType: gp2
+              VolumeSize: 30
+              Encrypted: true
+        UserData:
+          Fn::Base64:
+            |
+            #!/bin/bash
 
-          ### Version for Amazon Linux 2023
+            ### Version for Amazon Linux 2023
 
-          yum -y update
+            yum -y update
 
-          yum install -y php php-cli php-fpm php-mysqlnd php-zip php-devel \
-            php-gd php-mbstring php-curl php-xml php-pear php-bcmath php-json
-          yum install -y mariadb105-server mariadb105
-          yum -y install httpd
+            yum install -y php php-cli php-fpm php-mysqlnd php-zip php-devel \
+              php-gd php-mbstring php-curl php-xml php-pear php-bcmath php-json
+            yum install -y mariadb105-server mariadb105
+            yum -y install httpd
 
-          systemctl enable httpd
-          systemctl start httpd
+            systemctl enable httpd
+            systemctl start httpd
 
-          systemctl enable mariadb
-          systemctl start mariadb
+            systemctl enable mariadb
+            systemctl start mariadb
 
-          echo '<html><h1>Hello From Your Web Server!</h1></html>' > /var/www/html/index.html
-          find /var/www -type d -exec chmod 2775 {} \;
-          find /var/www -type f -exec chmod 0664 {} \;
-          echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
+            echo '<html><h1>Hello From Your Web Server!</h1></html>' > /var/www/html/index.html
+            find /var/www -type d -exec chmod 2775 {} \;
+            find /var/www -type f -exec chmod 0664 {} \;
+            echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
 
-          usermod -a -G apache ec2-user
-          chown -R ec2-user:apache /var/www
-          chmod 2775 /var/www
+            usermod -a -G apache ec2-user
+            chown -R ec2-user:apache /var/www
+            chmod 2775 /var/www
 
-          #Check /var/log/cloud-init-output.log after this runs to see errors, if any.
+            #Check /var/log/cloud-init-output.log after this runs to see errors, if any.
 
-          #
-          # Download and unzip the Mom & Pop Cafe application files.
-          #
+            #
+            # Download and unzip the Mom & Pop Cafe application files.
+            #
 
-          # Database scripts
-          wget https://aws-tc-largeobjects.s3.us-west-2.amazonaws.com/ILT-TF-200-ACSOPS-1/activity-3/momPopDb.tar.gz
-          tar -zxvf momPopDb.tar.gz
+            # Database scripts
+            wget https://aws-tc-largeobjects.s3.us-west-2.amazonaws.com/ILT-TF-200-ACSOPS-1/activity-3/momPopDb.tar.gz
+            tar -zxvf momPopDb.tar.gz
 
-          # Web application files
-          wget https://aws-tc-largeobjects.s3.us-west-2.amazonaws.com/ILT-TF-200-ACSOPS-1/activity-3/mompopcafe.tar.gz
-          tar -zxvf mompopcafe.tar.gz -C /var/www/html/
+            # Web application files
+            wget https://aws-tc-largeobjects.s3.us-west-2.amazonaws.com/ILT-TF-200-ACSOPS-1/activity-3/mompopcafe.tar.gz
+            tar -zxvf mompopcafe.tar.gz -C /var/www/html/
 
-          #
-          # Run the scripts to set the database root password, and create and populate the application database.
-          # Check the following logs to make sure there are no errors:
-          #
-          #       /momPopDb/set-root-password.log
-          #       /momPopDb/create-db.log
-          #
-          cd momPopDb
+            #
+            # Run the scripts to set the database root password, and create and populate the application database.
+            # Check the following logs to make sure there are no errors:
+            #
+            #       /momPopDb/set-root-password.log
+            #       /momPopDb/create-db.log
+            #
+            cd momPopDb
 
-          # Changes for newer version of MariaDB 10.5+ (Amazon Linux 2023)
-          password=$(grep -oP '(?<=PASSWORD\(")[^"]+' sql/set-root-password.sql)
-          cat > sql/set-root-password.sql << EOF
-          ALTER USER 'root'@'localhost' IDENTIFIED BY '${password}';
-          FLUSH PRIVILEGES;
-          EOF
-
-
-          ./set-root-password.sh
-          ./create-db.sh
-          hostnamectl set-hostname web-server
-
-          #
-          # Custom modifications for course IIKS
-          #
-
-          # Getting metadata via IMDSv2
-          mkdir -p /var/www/html/mompopcafe/info
-          TOKEN=$(curl --request PUT "http://169.254.169.254/latest/api/token" --header "X-aws-ec2-metadata-token-ttl-seconds: 3600")
-          curl -s http://169.254.169.254/latest/meta-data/local-ipv4 --header "X-aws-ec2-metadata-token: $TOKEN" > /var/www/html/mompopcafe/info/local-ipv4
-          curl -s http://169.254.169.254/latest/meta-data/instance-id --header "X-aws-ec2-metadata-token: $TOKEN" > /var/www/html/mompopcafe/info/instance-id
-          curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone --header "X-aws-ec2-metadata-token: $TOKEN" > /var/www/html/mompopcafe/info/az
-
-          # Enable serverInfo.php page and fix missing info
-          find /var/www/html/mompopcafe/ -type f -name "*.php" -exec sed 's/\/\/include(/include(/' -i {} \;
-          sed 's/showServerInfo = \"false\"/showServerInfo = \"true\"/' -i /var/www/html/mompopcafe/getAppParameters.php
+            # Changes for newer version of MariaDB 10.5+ (Amazon Linux 2023)
+            password=$(grep -oP '(?<=PASSWORD\(")[^"]+' sql/set-root-password.sql)
+            cat > sql/set-root-password.sql << EOF
+            ALTER USER 'root'@'localhost' IDENTIFIED BY '${password}';
+            FLUSH PRIVILEGES;
+            EOF
 
 
-          sed "/\$ipAddress = file_get_contents/s|file_get_contents('[^']*')|file_get_contents('/var/www/html/mompopcafe/info/local-ipv4')|" -i /var/www/html/mompopcafe/serverInfo.php
-          sed "/\$instanceID = file_get_contents/s|file_get_contents('[^']*')|file_get_contents('/var/www/html/mompopcafe/info/instance-id')|" -i /var/www/html/mompopcafe/serverInfo.php
-          sed "9i\\\t\$az = file_get_contents('/var/www/html/mompopcafe/info/az');" -i /var/www/html/mompopcafe/serverInfo.php
+            ./set-root-password.sh
+            ./create-db.sh
+            hostnamectl set-hostname web-server
+
+            #
+            # Custom modifications for course IIKS
+            #
+
+            # Getting metadata via IMDSv2
+            mkdir -p /var/www/html/mompopcafe/info
+            TOKEN=$(curl --request PUT "http://169.254.169.254/latest/api/token" --header "X-aws-ec2-metadata-token-ttl-seconds: 3600")
+            curl -s http://169.254.169.254/latest/meta-data/local-ipv4 --header "X-aws-ec2-metadata-token: $TOKEN" > /var/www/html/mompopcafe/info/local-ipv4
+            curl -s http://169.254.169.254/latest/meta-data/instance-id --header "X-aws-ec2-metadata-token: $TOKEN" > /var/www/html/mompopcafe/info/instance-id
+            curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone --header "X-aws-ec2-metadata-token: $TOKEN" > /var/www/html/mompopcafe/info/az
+
+            # Enable serverInfo.php page and fix missing info
+            find /var/www/html/mompopcafe/ -type f -name "*.php" -exec sed 's/\/\/include(/include(/' -i {} \;
+            sed 's/showServerInfo = \"false\"/showServerInfo = \"true\"/' -i /var/www/html/mompopcafe/getAppParameters.php
+
+
+            sed "/\$ipAddress = file_get_contents/s|file_get_contents('[^']*')|file_get_contents('/var/www/html/mompopcafe/info/local-ipv4')|" -i /var/www/html/mompopcafe/serverInfo.php
+            sed "/\$instanceID = file_get_contents/s|file_get_contents('[^']*')|file_get_contents('/var/www/html/mompopcafe/info/instance-id')|" -i /var/www/html/mompopcafe/serverInfo.php
+            sed "9i\\\t\$az = file_get_contents('/var/www/html/mompopcafe/info/az');" -i /var/www/html/mompopcafe/serverInfo.php
 
 
   # AWS docs: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-as-group.html
@@ -264,7 +273,9 @@ Resources:
         - Fn::ImportValue: !Sub "${NetworkStackName}-PrivateSubnetAId"
         - Fn::ImportValue: !Sub "${NetworkStackName}-PrivateSubnetBId"
         - Fn::ImportValue: !Sub "${NetworkStackName}-PrivateSubnetCId"
-      LaunchConfigurationName: !Ref PrivateLaunchConfiguration
+      LaunchTemplate:
+        LaunchTemplateId: !Ref PrivateLaunchTemplate
+        Version: !GetAtt PrivateLaunchTemplate.LatestVersionNumber
       MinSize: 1
       MaxSize: 4
       DesiredCapacity: 2

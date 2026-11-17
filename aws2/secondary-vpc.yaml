@@ -1,12 +1,13 @@
-#nezabudnut spravne nastavit networkstackname default: na spravny parent name stacku
-
 AWSTemplateFormatVersion: 2010-09-09
 
-Description: secondary vpc
+Description: >
+  Lab 2 - Secondary VPC with one private instance, peered with the primary
+  VPC from basic-network.yaml. Routes are created on both sides of the
+  peering, so no peering ID has to be copied between stacks.
 
 Parameters:
   VpcCidr:
-    Description: VpcCidr
+    Description: CIDR of the secondary VPC (must not overlap the primary VPC)
     Type: String
     Default: 10.222.0.0/16
 
@@ -16,39 +17,33 @@ Parameters:
     Default: lab
 
   Project:
-    Description: Environment
+    Description: Project
     Type: String
     Default: FRI
 
   ImageId:
-    Description: AMI (Amazon Machine Image) ID
-    Type: String
-    Default: ami-0f3caa1cf4417e51b # toto sa meni
+    Description: AMI ID, resolved from the public SSM parameter for the latest Amazon Linux 2023 image in the current region
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
   InstanceType:
     Description: Instance type (number of vCPUs, memory, bandwidth, etc.)
     Type: String
-    Default: t3.medium
+    Default: t3.micro
 
   IamInstanceProfileName:
     Description: Instance IAM profile name (account-specific, e.g. the SSM Quick Setup instance profile)
     Type: String
 
   NetworkStackName:
-    Description: Name of parent network CloudFormation stack
+    Description: Name of the primary network stack (deployed from basic-network.yaml)
     Type: String
-    Default: basic-network #stack name
+    Default: basic-network
 
-  PublicSubnetCidrBlock:
-    Description: Cidr block number
-    Type: String
-    Default: 10
-
-  PrivateSubnetCidrBlock:
-    Description: Cidr block number
-    Type: String
+  PrivateSubnetIndex:
+    Description: Index of the /24 block inside VpcCidr used for the private subnet
+    Type: Number
     Default: 11
-
 
 Resources:
   Vpc:
@@ -63,39 +58,26 @@ Resources:
         - { Key: Environment, Value: !Ref Environment }
         - { Key: Project, Value: !Ref Project }
 
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - { Key: Name, Value: Igw_secondary }
-        - { Key: Environment, Value: !Ref Environment }
-        - { Key: Project, Value: !Ref Project }
-
-  InternetGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref Vpc
-      InternetGatewayId: !Ref InternetGateway
-
   VpcPeering:
-    DependsOn: Vpc
     Type: AWS::EC2::VPCPeeringConnection
-    Properties: 
-      PeerVpcId: 
-        Fn::ImportValue: !Sub ${NetworkStackName}-VpcId
+    Properties:
       VpcId: !Ref Vpc
+      PeerVpcId:
+        Fn::ImportValue: !Sub ${NetworkStackName}-VpcId
       Tags:
         - { Key: Name, Value: vpcpeering }
         - { Key: Environment, Value: !Ref Environment }
         - { Key: Project, Value: !Ref Project }
 
-###################################################################
+  ###################################################################
+  # Secondary VPC: private subnet and route back to the primary VPC
+  ###################################################################
 
   PrivateSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: !Select [ !Ref PrivateSubnetCidrBlock, !Cidr [ !Ref VpcCidr, 256, 8 ]]
+      CidrBlock: !Select [ !Ref PrivateSubnetIndex, !Cidr [ !Ref VpcCidr, 256, 8 ]]
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
       Tags:
         - { Key: Name, Value: PrivateSubnet_secondary }
@@ -117,27 +99,50 @@ Resources:
       SubnetId: !Ref PrivateSubnet
       RouteTableId: !Ref PrivateRouteTable
 
-  RouteToPrimaryVPC:
-    DependsOn: VpcPeering
+  RouteToPrimaryVpc:
     Type: AWS::EC2::Route
     Properties:
-        RouteTableId: !Ref PrivateRouteTable
-        DestinationCidrBlock: 
-          Fn::ImportValue: !Sub '${NetworkStackName}-VpcCidr'
-        VpcPeeringConnectionId: !Ref VpcPeering
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock:
+        Fn::ImportValue: !Sub '${NetworkStackName}-VpcCidr'
+      VpcPeeringConnectionId: !Ref VpcPeering
 
-#################################################
-#################################################
+  ###################################################################
+  # Primary VPC: routes to the secondary VPC (route tables exported by
+  # basic-network.yaml). The public route lets the bastion reach the
+  # secondary instance; the private route covers private subnet A.
+  ###################################################################
+
+  PrimaryPublicRouteToSecondary:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-PublicRouteTableId'
+      DestinationCidrBlock: !Ref VpcCidr
+      VpcPeeringConnectionId: !Ref VpcPeering
+
+  PrimaryPrivateRouteToSecondary:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-PrivateRouteTableAId'
+      DestinationCidrBlock: !Ref VpcCidr
+      VpcPeeringConnectionId: !Ref VpcPeering
+
+  ###################################################################
+  # Private instance in the secondary VPC
+  ###################################################################
+
   PrivateSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Private Security Group
+      GroupDescription: Secondary VPC private instance - SSH and ping from the primary VPC only
       VpcId: !Ref Vpc
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 22,   ToPort: 22,   CidrIp:  { Fn::ImportValue: !Sub '${NetworkStackName}-VpcCidr' }, Description: Home IP - SSH }
-        - { IpProtocol: icmp, FromPort: -1,   ToPort: -1,   CidrIp:  { Fn::ImportValue: !Sub '${NetworkStackName}-VpcCidr' }, Description: Home IP - SSH }
+        - { IpProtocol: tcp,  FromPort: 22, ToPort: 22, CidrIp: { Fn::ImportValue: !Sub '${NetworkStackName}-VpcCidr' }, Description: SSH from primary VPC }
+        - { IpProtocol: icmp, FromPort: -1, ToPort: -1, CidrIp: { Fn::ImportValue: !Sub '${NetworkStackName}-VpcCidr' }, Description: Ping from primary VPC }
       SecurityGroupEgress:
-        - { IpProtocol: tcp, FromPort: 22,  ToPort: 22,  CidrIp: 0.0.0.0/0, Description: HTTPS }
+        - { IpProtocol: icmp, FromPort: -1, ToPort: -1, CidrIp: { Fn::ImportValue: !Sub '${NetworkStackName}-VpcCidr' }, Description: Ping primary VPC }
       Tags:
         - { Key: Name, Value: PrivateSG_secondary }
         - { Key: Environment, Value: !Ref Environment }
@@ -152,19 +157,12 @@ Resources:
         - !Ref PrivateSecurityGroup
       ImageId: !Ref ImageId
       InstanceType: !Ref InstanceType
-#     KeyName: !Ref SSHKeyPairPrivate
       IamInstanceProfile: !Ref IamInstanceProfileName
       UserData:
-        Fn::Base64: !Sub
-          - |
-            #!/bin/bash
-
-            echo 1 > /proc/sys/net/ipv4/ip_forward
-
-            echo "Hello world."
-            echo "This instance was created in environment ${Environment} in region ${AWS::Region}"
-
-          - Environment: !Ref Environment
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Hello world."
+          echo "This instance was created in environment ${Environment} in region ${AWS::Region}"
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:
@@ -179,4 +177,9 @@ Resources:
         - Key: Project
           Value: !Ref Project
 
+Outputs:
+  VpcPeeringConnectionId:
+    Value: !Ref VpcPeering
 
+  PrivateInstanceIp:
+    Value: !GetAtt PrivateInstanceA.PrivateIp

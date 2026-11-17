@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 
-Description: Cvicenie 5 - CloudWatch alarms
+Description: Lab 5 - CloudWatch CPU alarms driving simple scaling of the aws3 Auto Scaling group, with SNS email notifications
 
 ###########################################################################
 # Useful CloudFormation docs
@@ -28,11 +28,13 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: PrivateASGHighCPUAlarm
-      AlarmDescription: Scale-up if CPU is greater than 90% for 1 minute in PrivateAutoScalingGroup
+      AlarmDescription: Scale up if average CPU is above 90% for 2 minutes in PrivateAutoScalingGroup
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
-      Period: 30
+      # EC2 publishes CPUUtilization every 60 s (detailed monitoring) or 300 s,
+      # so a shorter period would only ever see missing data.
+      Period: 60
       EvaluationPeriods: 2
       Threshold: 90
       ComparisonOperator: GreaterThanThreshold
@@ -57,11 +59,11 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: PrivateASGLowCPUAlarm
-      AlarmDescription: Scale-down if CPU is lesser than 70% for 1 minute in PrivateAutoScalingGroup
+      AlarmDescription: Scale down if average CPU is below 70% for 2 minutes in PrivateAutoScalingGroup
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
-      Period: 30
+      Period: 60
       EvaluationPeriods: 2
       Threshold: 70
       ComparisonOperator: LessThanThreshold
@@ -99,23 +101,14 @@ Resources:
         Id: CPUAlarmsSNSTopicPolicy
         Version: 2012-10-17
         Statement:
-        - Sid: ManagePolicy
-          Effect: Allow
-          Principal:
-            Service: cloudwatch.amazonaws.com
-          Action:
-            - sns:SetTopicAttributes
-            - sns:RemovePermission
-            - sns:ListSubscriptionsByTopic
-            - sns:GetTopicAttributes
-            - sns:DeleteTopic
-            - sns:AddPermission
-          Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:CPUAlarmsSNSTopic'
-        - Sid: SubscribePolicy
-          Effect: Allow
-          Principal:
-            Service: cloudwatch.amazonaws.com
-          Action:
-            - sns:Subscribe
-            - sns:Publish
-          Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:CPUAlarmsSNSTopic'
+          # CloudWatch only needs to publish alarm notifications; restrict it to
+          # alarms owned by this account to avoid the confused-deputy problem.
+          - Sid: AllowCloudWatchAlarmsToPublish
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref CPUAlarmsSNSTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId

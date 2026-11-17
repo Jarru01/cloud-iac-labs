@@ -216,31 +216,16 @@ Resources:
       RouteTableId: !Ref PrivateRouteTableC
 
   DefaultRouteA:
-    DependsOn: NATGatewayA
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableA
         DestinationCidrBlock: '0.0.0.0/0'
         NatGatewayId: !Ref NATGatewayA
-        
-#pri initial stack creationu zakomentovat
-  RoutetoSecondaryVPC:
-    Type: AWS::EC2::Route
-    Properties:
-        RouteTableId: !Ref PrivateRouteTableA
-        DestinationCidrBlock: '10.222.0.0/16'
-        VpcPeeringConnectionId: pcx-01442bbf41129f759 # toto sa meni(id) 
 
-  #kvoli Bastion → PrivateInstance_secondaryVPC
-  RouteToSecondaryFromPublic:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 10.222.0.0/16
-      VpcPeeringConnectionId: pcx-01442bbf41129f759  # peering ID
+  # Routes to the peered secondary VPC are created by secondary-vpc.yaml,
+  # using the route table IDs exported below.
 
   DefaultRouteB:
-    DependsOn: NATGatewayB
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableB
@@ -248,7 +233,6 @@ Resources:
         NatGatewayId: !Ref NATGatewayB
 
   DefaultRouteC:
-    DependsOn: NATGatewayC
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableC
@@ -312,6 +296,16 @@ Outputs:
     Value: !Ref VpcCidr
     Export:
       Name: !Sub ${AWS::StackName}-VpcCidr
+
+  PublicRouteTableId:
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicRouteTableId
+
+  PrivateRouteTableAId:
+    Value: !Ref PrivateRouteTableA
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateRouteTableAId
 
   PublicSubnetAId:
     Value: !Ref PublicSubnetA

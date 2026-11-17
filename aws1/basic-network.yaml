@@ -195,21 +195,18 @@ Resources:
       SubnetId: !Ref PrivateSubnetC
       RouteTableId: !Ref PrivateRouteTableC
   DefaultRouteA:
-    DependsOn: NATGatewayA
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableA
         DestinationCidrBlock: '0.0.0.0/0'
         NatGatewayId: !Ref NATGatewayA
   DefaultRouteB:
-    DependsOn: NATGatewayB
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableB
         DestinationCidrBlock: '0.0.0.0/0'
         NatGatewayId: !Ref NATGatewayB
   DefaultRouteC:
-    DependsOn: NATGatewayC
     Type: AWS::EC2::Route
     Properties:
         RouteTableId: !Ref PrivateRouteTableC
