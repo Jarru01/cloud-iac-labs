@@ -1,11 +1,23 @@
-# OpenStack Heat – Prehľad úloh
+# OpenStack Heat — basic templates
+
+Deploy with the OpenStack CLI (requires `python-heatclient`):
+
+```bash
+openstack stack create -t task1.yml task1
+openstack stack output show task1 --all
+```
+
+Image, flavor and network names default to the values of the course cloud
+and can be overridden with `--parameter key=value`.
 
 ---
 
-## Úloha 1 — `task1.yml`
-**Dve VM v spoločnej externej sieti**
+## Task 1 — `task1.yml`
+**Two VMs on the same external network**
 
-Skript vytvorí security group (ICMP + SSH), dva Neutron porty v sieti `ext-net-154` a dve VM (`vm1`, `vm2`) napojené každá na vlastný port. Žiadna interná sieť – obe VM sú priamo v externej sieti.
+Creates a security group (ICMP + SSH), two Neutron ports on `ext-net-154`
+and two VMs (`vm1`, `vm2`), each attached to its own port. There is no
+internal network; both VMs sit directly on the external network.
 
 ```
 ┌─────────────────────────────────────┐
@@ -23,10 +35,13 @@ Security group: ICMP + TCP/22
 
 ---
 
-## Úloha 2 — `task2.yml`
-**VM router + interná VM za ním**
+## Task 2 — `task2.yml`
+**VM router with an internal VM behind it**
 
-Skript vytvorí internú sieť `net-is1` (subnet `192.168.50.0/24`), security group (ICMP + SSH), a dve VM. `vm-router` má dve sieťové rozhrania – jedno v externej a jedno v internej sieti, pričom pri štarte povolí IP forwarding. `vm-internal` je pripojená iba do internej siete.
+Creates the internal network `net-is1` (subnet `192.168.50.0/24`), a
+security group (ICMP + SSH) and two VMs. `vm-router` has one interface on
+the external network and one on the internal network and enables IP
+forwarding at boot; `vm-internal` is connected only to the internal network.
 
 ```
                   ext-net-154
@@ -52,10 +67,20 @@ Security group: ICMP + TCP/22
 
 ---
 
-## Úloha 3 — `task3.yml`
-**Router VM + web server s obmedzeným security group**
+## Task 3 — `task3.yml`
+**Router/NAT VM and a web server behind it**
 
-Skript vytvorí internú sieť `net-is2` (subnet `10.0.1.0/24`), security group s obmedzeným SSH (iba z UNIZA siete `158.193.0.0/16`) a povoleným HTTP (port 80). `router-vm` má dve rozhrania, povolí smerovanie a nastaví NAT (masquerade). `web-vm` je v internej sieti a automaticky nainštaluje Apache2.
+Creates the internal network `net-is2` (subnet `10.0.1.0/24`, no Neutron
+gateway) and two Debian VMs:
+
+- `router-vm` is dual-homed. Its internal port has a fixed address
+  (`10.0.1.254`) and **port security disabled**, because Neutron's
+  anti-spoofing rules would otherwise drop packets it forwards for other
+  hosts. At boot it enables IP forwarding and NATs (masquerades) traffic out
+  of whichever interface holds its default route.
+- `web-vm` lives only on the internal network. Its user data points the
+  default route at the router VM, waits until the internet is reachable,
+  then installs Apache.
 
 ```
   Internet
@@ -67,7 +92,7 @@ Skript vytvorí internú sieť `net-is2` (subnet `10.0.1.0/24`), security group 
 │  (debian-12-kis)  │
 │  ip_forward + NAT │
 └────┬──────────────┘
-     │
+     │ 10.0.1.254
 ┌────────────────────────────┐
 │  net-is2  (10.0.1.0/24)    │
 │                            │
@@ -78,10 +103,10 @@ Skript vytvorí internú sieť `net-is2` (subnet `10.0.1.0/24`), security group 
 │  └──────────────────────┘  │
 └────────────────────────────┘
 
-Security group:
-  SSH  → len 158.193.0.0/16 (UNIZA)
-  HTTP → 0.0.0.0/0
-  ICMP → 0.0.0.0/0
-
-⚠ web-vm vyžaduje manuálne nastavenie default route cez router-vm
+router-vm SG:  SSH from trusted_cidr (default 158.193.0.0/16), ICMP
+web-vm SG:     SSH from trusted_cidr and from 10.0.1.0/24, HTTP, ICMP
 ```
+
+The web server is reachable from inside `net-is2` (e.g. via SSH to the
+router VM). Publishing it to the outside would need a DNAT rule on the
+router VM or a floating IP.

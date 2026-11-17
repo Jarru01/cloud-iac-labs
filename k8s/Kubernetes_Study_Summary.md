@@ -10,7 +10,7 @@ Kubernetes (k8s) is a **portable, extensible, open-source platform** for managin
 - Open-sourced on **June 7, 2014**
 - Now maintained by the **Cloud Native Computing Foundation (CNCF)**
 - Name means **"helmsman" or "pilot"** in Greek
-- Current version: **1.29**
+- Version covered by these notes: **1.29** (check [kubernetes.io/releases](https://kubernetes.io/releases/) for the current one)
 
 ### Key Features
 - **Service discovery & load balancing** — exposes containers via DNS or IP; distributes traffic automatically

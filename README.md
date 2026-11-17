@@ -1,22 +1,53 @@
 # Cloud Technologies — IaC Labs
 
+[![lint](https://github.com/Jarru01/multi-cloud-iac/actions/workflows/lint.yml/badge.svg)](https://github.com/Jarru01/multi-cloud-iac/actions/workflows/lint.yml)
+
 Infrastructure-as-Code exercises from the *Virtualization and Cloud
-Technologies* university course: AWS CloudFormation, OpenStack HEAT, and
+Technologies* university course: AWS CloudFormation, OpenStack Heat, and
 Terraform/OpenTofu templates.
 
 ## 📂 Contents
 
-| Folder | Topic |
-|---|---|
-| [`aws1/`](aws1/) | AWS basics, automation tools, versioning |
-| [`aws2/`](aws2/) | VPC networking — SG/NACL, VPC peering, S2S VPN, Direct Connect, PrivateLink, Transit Gateway |
-| [`aws3/`](aws3/) | EC2 instances, autoscaling groups & load balancing |
-| `aws4` *(not committed)* | Lambda, Step Functions, API Gateway, containers |
-| [`aws5/`](aws5/) | CloudFormation — S3, CloudWatch alarms (deployed on top of the `aws3/` network and ASG stacks) |
-| [`openstack1/`](openstack1/) | Basic HEAT templates for OpenStack |
-| [`openstack2/`](openstack2/) | Advanced HEAT templates |
-| [`terraform/`](terraform/) | Basic Terraform/**OpenTofu** script |
-| [`k8s/`](k8s/) | Kubernetes study summary |
+| Folder | Tool | What it builds |
+|---|---|---|
+| [`aws1/`](aws1/) | CloudFormation | Base VPC — public and private subnets in 3 AZs, internet gateway, NAT gateway per AZ |
+| [`aws2/`](aws2/) | CloudFormation | Bastion host, private instances, VPC peering with routes on both sides ([notes](aws2/README.md)) |
+| [`aws3/`](aws3/) | CloudFormation | EC2 key pair, security groups and private web servers; Application Load Balancer in front of an Auto Scaling group |
+| [`aws5/`](aws5/) | CloudFormation | CloudWatch CPU alarms driving scaling policies with SNS email alerts; private, encrypted, versioned S3 bucket |
+| [`openstack1/`](openstack1/) | Heat | Basic topologies, including a Linux VM acting as router/NAT ([notes](openstack1/README.md)) |
+| [`openstack2/`](openstack2/) | Heat | Ten advanced templates — routers, fixed IPs, conditions, key pairs, resource groups ([notes](openstack2/README.md)) |
+| [`terraform/`](terraform/) | Terraform / OpenTofu | Single OpenStack instance, credentials from `clouds.yaml` or `OS_*` variables |
+| [`k8s/`](k8s/) | — | Kubernetes study notes |
+
+## 🚀 Deploying
+
+**AWS** — stacks reference each other through exports, so deploy the network
+first. The `aws5` alarms attach to the Auto Scaling group from `aws3`.
+
+```bash
+aws cloudformation deploy --stack-name basic-network --template-file aws3/basic-network.yaml
+aws cloudformation deploy --stack-name ec2 --template-file aws3/ec2_asg.yaml \
+  --parameter-overrides OurPublicIp=203.0.113.10/32 IamInstanceProfileName=<profile>
+aws cloudformation deploy --stack-name alarms --template-file aws5/cloudwatch.yaml \
+  --parameter-overrides EC2StackName=ec2 NotificationEmail=you@example.com
+```
+
+AMIs are resolved from the public SSM parameter for the latest Amazon Linux
+2023 image, so the templates work in any region without editing.
+
+**OpenStack Heat**
+
+```bash
+openstack stack create -t openstack2/task10.yml --parameter vm_count=3 demo
+```
+
+**Terraform / OpenTofu**
+
+```bash
+export OS_CLOUD=mycloud        # entry in clouds.yaml, or source an openrc file
+cd terraform
+terraform init && terraform apply   # or: tofu init && tofu apply
+```
 
 ## 🔐 Credentials
 
@@ -24,18 +55,34 @@ No credentials are stored in this repository.
 
 - **AWS:** deploy with your own CLI profile. Account-specific values (IAM
   instance profile name, notification email, source IP) are stack parameters.
-- **OpenStack / Terraform:** the provider reads credentials from a
-  `clouds.yaml` entry (`OS_CLOUD`) or from the `OS_*` variables of an
-  OpenStack RC file.
+- **OpenStack / Terraform:** credentials come from a `clouds.yaml` entry
+  (`OS_CLOUD`) or from the `OS_*` variables of an OpenStack RC file.
+
+## ✅ Checks
+
+Every push runs [`lint.yml`](.github/workflows/lint.yml):
+
+- `cfn-lint` on all CloudFormation templates
+- `terraform fmt -check` and `terraform validate`
+- an offline reference check for the Heat templates
+  ([`check_heat.py`](.github/scripts/check_heat.py)): YAML syntax and every
+  `get_param` / `get_resource` / `get_attr` / `depends_on` target
 
 ## 🙏 Credits
 
-Some templates build on starter material provided by the course instructors:
-`aws3/basic-network.yaml` and `aws3/ec2_asg.yaml` are course-provided templates
-(the latter includes the sample web application setup from the lab), adapted
-only with lab-specific parameters. The other templates were written or
-substantially reworked as part of the exercises.
+Some templates build on starter material provided by the course instructors.
+`aws3/basic-network.yaml` and `aws3/ec2_asg.yaml` are course-provided
+templates (the latter includes the sample web application from the lab).
+They are adapted with lab parameters, and `ec2_asg.yaml` was updated from
+a launch configuration to a launch template with IMDSv2 and an SSM-based AMI
+lookup. The other templates were written or substantially reworked as part of
+the exercises.
 
 ## ⚠️ Scope
 
 These are educational lab templates, not production-ready infrastructure.
+
+## 📄 License
+
+[MIT](LICENSE), for my own work in this repository. Course-provided material
+listed under *Credits* remains with its authors.
