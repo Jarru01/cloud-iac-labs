@@ -1,4 +1,4 @@
-﻿# Cloud Technologies â€” IaC Labs
+# Cloud Technologies — IaC Labs
 
 [![lint](https://github.com/Jarru01/cloud-iac-labs/actions/workflows/lint.yml/badge.svg)](https://github.com/Jarru01/cloud-iac-labs/actions/workflows/lint.yml)
 
@@ -6,22 +6,22 @@ Infrastructure-as-Code exercises from the *Virtualization and Cloud
 Technologies* university course: AWS CloudFormation, OpenStack Heat, and
 Terraform/OpenTofu templates.
 
-## ðŸ“‚ Contents
+## 📂 Contents
 
 | Folder | Tool | What it builds |
 |---|---|---|
-| [`aws1/`](aws1/) | CloudFormation | Base VPC â€” public and private subnets in 3 AZs, internet gateway, NAT gateway per AZ |
+| [`aws1/`](aws1/) | CloudFormation | Base VPC — public and private subnets in 3 AZs, internet gateway, NAT gateway per AZ |
 | [`aws2/`](aws2/) | CloudFormation | Bastion host, private instances, VPC peering with routes on both sides ([notes](aws2/README.md)) |
 | [`aws3/`](aws3/) | CloudFormation | EC2 key pair, security groups and private web servers; Application Load Balancer in front of an Auto Scaling group |
 | [`aws5/`](aws5/) | CloudFormation | CloudWatch CPU alarms driving scaling policies with SNS email alerts; private, encrypted, versioned S3 bucket |
 | [`openstack1/`](openstack1/) | Heat | Basic topologies, including a Linux VM acting as router/NAT ([notes](openstack1/README.md)) |
-| [`openstack2/`](openstack2/) | Heat | Ten advanced templates â€” routers, fixed IPs, conditions, key pairs, resource groups ([notes](openstack2/README.md)) |
+| [`openstack2/`](openstack2/) | Heat | Ten advanced templates — routers, fixed IPs, conditions, key pairs, resource groups ([notes](openstack2/README.md)) |
 | [`terraform/`](terraform/) | Terraform / OpenTofu | Single OpenStack instance, credentials from `clouds.yaml` or `OS_*` variables |
-| [`k8s/`](k8s/) | â€” | Kubernetes study notes |
+| [`k8s/`](k8s/) | — | Kubernetes study notes |
 
-## ðŸš€ Deploying
+## 🚀 Deploying
 
-**AWS** â€” stacks reference each other through exports, so deploy the network
+**AWS** — stacks reference each other through exports, so deploy the network
 first. The `aws5` alarms attach to the Auto Scaling group from `aws3`.
 
 ```bash
@@ -49,7 +49,7 @@ cd terraform
 terraform init && terraform apply   # or: tofu init && tofu apply
 ```
 
-## ðŸ” Credentials
+## 🔐 Credentials
 
 No credentials are stored in this repository.
 
@@ -58,7 +58,7 @@ No credentials are stored in this repository.
 - **OpenStack / Terraform:** credentials come from a `clouds.yaml` entry
   (`OS_CLOUD`) or from the `OS_*` variables of an OpenStack RC file.
 
-## âœ… Checks
+## ✅ Checks
 
 Every push runs [`lint.yml`](.github/workflows/lint.yml):
 
@@ -68,7 +68,7 @@ Every push runs [`lint.yml`](.github/workflows/lint.yml):
   ([`check_heat.py`](.github/scripts/check_heat.py)): YAML syntax and every
   `get_param` / `get_resource` / `get_attr` / `depends_on` target
 
-## ðŸ™ Credits
+## 🙏 Credits
 
 Some templates build on starter material provided by the course instructors.
 `aws3/basic-network.yaml` and `aws3/ec2_asg.yaml` are course-provided
@@ -78,11 +78,11 @@ a launch configuration to a launch template with IMDSv2 and an SSM-based AMI
 lookup. The other templates were written or substantially reworked as part of
 the exercises.
 
-## âš ï¸ Scope
+## ⚠️ Scope
 
 These are educational lab templates, not production-ready infrastructure.
 
-## ðŸ“„ License
+## 📄 License
 
 [MIT](LICENSE), for my own work in this repository. Course-provided material
 listed under *Credits* remains with its authors.
